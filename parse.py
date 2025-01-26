@@ -193,6 +193,7 @@ def extract_dfns(soup):
     cnt_skip_multiple = 0
     cnt_res_multiple = 0
     cnt_res_concepts = 0
+    cnt_skip_unknown = 0
 
     for dfn in tqdm(soup.find_all("dfn")):
         parent = dfn.find_parent()
@@ -229,6 +230,7 @@ def extract_dfns(soup):
             Config.used_element_handler(parent)
 
         else:
+            cnt_skip_unknown += 1
             logging.debug("Cannot understand dfn '%s'", str(dfn))
 
     n_remaining_dfns = len(soup.find_all("dfn"))
@@ -241,6 +243,7 @@ def extract_dfns(soup):
     logging.info("Skipped %d dfns due to multiple dfns in context", cnt_skip_multiple)
     logging.info("Resolved %d multiple dfns by identifying conjunction", cnt_res_multiple)
     logging.info("Resolved %d multiple dfns by identifying at most one non-concept", cnt_res_concepts)
+    logging.info("Skipped %d dfns due to not understanding them", cnt_skip_unknown)
 
     return definitions
 
@@ -280,7 +283,7 @@ def main():
     logging.info("Serializing remaining doc")
     unused_source = soup.decode()
 
-    with open("graph.json", "w", encoding="utf-8") as json_file:
+    with open("static/graph.json", "w", encoding="utf-8") as json_file:
         json.dump(definitions.get_graph(), json_file, indent=4)
 
     with open("concepts.json", "w", encoding="utf-8") as json_file:

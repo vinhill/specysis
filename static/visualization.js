@@ -1,6 +1,6 @@
 
 async function loadAssociations() {
-  const response = await fetch("/api/graph");
+  const response = await fetch("graph.json");
   const data = await response.json();
 
   // Convert { "ConceptA": ["Ref1","Ref2"], ... } into D3-friendly { nodes, links }
@@ -332,7 +332,10 @@ function setupAutocompleteNames({ input, names }) {
   });
 
   input.addEventListener("blur", () => {
-    suggestions.style.display = "none";
+    // Wait a tick for onclick handler to execute
+    setTimeout(
+      () => suggestions.style.display = "none"
+    , 0);
   });
 }
 
