@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>HTML Spec Graph</title>
+  <!-- D3 library -->
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <!-- Include the CSS for styling -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>HTML Spec Graph</h1>
+    <div class="controls">
+      <!-- Node search -->
+      <div class="control">
+        <input type="text" id="searchInput" placeholder="Highlight nodes..." autocomplete="off" />
+        <button id="searchBtn">Highlight</button>
+    </div>
+      
+      <!-- Freeze simulation checkbox -->
+      <div class="control">
+        <label>
+          <input type="checkbox" id="freezeCheckbox" />
+          Freeze
+        </label>
+      </div>
+
+      <!-- Simulation speed slider -->
+      <div class="control">
+        <label>
+          Alpha decay: 
+          <input type="range" id="alphaDecayInput" min="0.001" max="1" step="0.001" value="0.00228" />
+        </label>
+      </div>
+
+      <!-- Restart btn -->
+      <div class="control">
+        <button id="btnRestart">Restart</button>
+      </div>
+
+      <!-- Path finding -->
+      <div class="control">
+        <input type="text" id="startNodeInput" placeholder="Start node" autocomplete="off" />
+        <input type="text" id="endNodeInput" placeholder="End node" autocomplete="off" />
+        <button id="findPathBtn">Find path</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- The graph container fills the rest of the window -->
+  <div id="graph"></div>
+
+  <!-- Our visualization logic -->
+  <script src="visualization.js"></script>
+</body>
+</html>

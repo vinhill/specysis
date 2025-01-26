@@ -1,0 +1,105 @@
+/* style.css */
+
+/* Make page fill the full window */
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden; /* We'll rely on internal scrolling or no scroll */
+  font-family: sans-serif;
+}
+
+/* Header at the top */
+header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 50px;
+  width: 100%;
+  background-color: #f8f8f8;
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  box-sizing: border-box;
+  border-bottom: 1px solid #ccc;
+}
+
+header h1 {
+  margin: 0;
+  font-size: 18px;
+  flex: 0 0 auto;
+}
+
+.controls {
+  margin-left: 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.control {
+  border-left: 1px solid #aaa;
+  padding-left: 1em;
+  position: relative;
+}
+
+.control label {
+  display: flex;
+  align-items: center;
+}
+
+#freezeCheckbox {
+  margin-right: 4px;
+}
+
+#speedInput {
+  width: 100px;
+}
+
+/* Graph container below header */
+#graph {
+  position: absolute;
+  top: 50px; /* below header */
+  left: 0;
+  width: 100%;
+  height: calc(100% - 50px);
+  background-color: #fff;
+}
+
+/* Highlight classes */
+.node-highlight {
+  stroke: #ff5100;
+  stroke-width: 2px;
+}
+
+.link-highlight {
+  stroke: #fcda1e;
+  stroke-width: 2px;
+}
+
+.suggestion-list {
+  position: absolute;
+  top: 100%;    /* Positions the list directly below the input */
+  left: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid #ccc;
+  background-color: #fff;
+
+  max-height: 1000%;  /* Height 10x the input */
+  overflow-y: auto;
+  width: 100%;
+
+  z-index: 1; /* Ensure it's above the graph */
+}
+
+.suggestion-item {
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.suggestion-item:hover {
+  background-color: #eee;
+}
