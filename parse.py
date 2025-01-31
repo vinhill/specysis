@@ -4,9 +4,11 @@ from dataclasses import dataclass
 import re
 import requests
 from collections import Counter
+from typing import List, Tuple
 
 from tqdm import tqdm
 from bs4 import BeautifulSoup, Comment, NavigableString
+from openai import OpenAI
 
 logging.basicConfig(
     level=logging.INFO,
@@ -70,7 +72,7 @@ def clean_token(token: str) -> str:
 @dataclass
 class Config:
     # e.g. escape or lambda el: el.decompose()
-    used_element_handler: callable = lambda el: el.decompose()
+    used_element_handler: callable = escape
     # html.parser or lxml
     parser: str = "lxml"
 
@@ -96,9 +98,15 @@ def extract_refs(definition) -> set:
     return refs
 
 
+def update_dict(d, cng):
+    for k, v in cng.items():
+        d[k] = v
+
+
 class Definitions:
     def __init__(self):
-        # { concept: { dependencies: [concepts], defined: bool, dfn_txt: str, name: str } }
+        # { concept: { dependencies: [concepts], defined: bool, dfn_txt: str, name: str, ctype: str } }
+        # possible types: callable, variable, value, unknown
         self._concepts = {}
 
     def n_concepts(self):
@@ -111,15 +119,24 @@ class Definitions:
         for concept in concepts:
             if concept not in self._concepts:
                 self._concepts[concept] = {
-                    "dependencies": [], "defined": False, "dfn_txt": "", "name": ""
+                    "dependencies": [], "defined": False, "dfn_txt": "", "name": "", "type": "unknown"
                 }
+
+    def set_ctype(self, identifier, ctype):
+        self._ensure_concept(identifier)
+        self._concepts[identifier]["ctype"] = ctype
+
+    def get_ctype(self, identifier):
+        if identifier in self._concepts:
+            return self._concepts[identifier]["ctype"]
+        logging.warning("get_ctype for unknown concept %s", identifier)
 
     def add_dfn(self, dfn, dependencies):
         name = clean_token(dfn.get_text(strip=True))
         identifier = extract_identifier(dfn)
 
         if not identifier:
-            logging.warning("Cannot find identifier, skipping dfn '%s'", str(dfn))
+            logging.warning("Cannot find identifier, skip adding dfn '%s'", str(dfn))
             return
 
         self._ensure_concept(identifier, *dependencies)
@@ -127,12 +144,12 @@ class Definitions:
         if (concept := self._concepts[identifier]) and concept["defined"]:
             logging.warning("Redefinition of %s -- previous dfn_txt '%s' / new dfn_txt '%s'", identifier, concept["dfn_txt"], str(dfn))
 
-        self._concepts[identifier] = {
+        update_dict(self._concepts[identifier], {
             "dependencies": dependencies,
             "defined": True,
             "dfn_txt": str(dfn),
             "name": name,
-        }
+        })
 
     def get_graph(self):
         # { concept: [dependencies] }
@@ -187,25 +204,49 @@ def is_dfn_and_concepts(dfns) -> bool:
     return True
 
 
-def extract_dfns(soup):
-    definitions = Definitions()
+def is_dfn_and_dfnfors(dfns) -> bool:
+    # Don't skip dfn id if all but one have data-dfn-for=id
+    dfn_fors = []
+    dfns_nofor = []
+    for dfn in dfns:
+        if dfn.get("data-dfn-for"):
+            dfn_fors.append(dfn)
+        else:
+            dfns_nofor.append(dfn)
+    if len(dfns_nofor) != 1:
+        return False
+    dfn_id = extract_identifier(dfns_nofor[0])
+    return all(dfn.get("data-dfn-for") == dfn_id for dfn in dfn_fors)
 
+
+def extract_dfns(soup, definitions):
     cnt_skip_multiple = 0
     cnt_res_multiple = 0
     cnt_res_concepts = 0
+    cnt_res_dfnfors = 0
     cnt_skip_unknown = 0
+    cnt_skip_noid = 0
 
     for dfn in tqdm(soup.find_all("dfn")):
         parent = dfn.find_parent()
 
         if not parent:
-            logging.debug("No parent element, skipping dfn '%s'", str(dfn))
+            # TODO removing elements might cause us to miss dfns?
+            # i.e. later in the used_element_handler
+            logging.debug("No parent element, skipping extract dfn '%s'", dfn)
+            continue
+
+        if not extract_identifier(dfn):
+            cnt_skip_noid += 1
+            logging.debug("No identifier, skipping dfn '%s'", dfn)
             continue
         elif (dfns := parent.find_all("dfn")) and len(dfns) > 1:
             if is_multiple_dfn(dfns):
                 cnt_res_multiple += 1
             elif is_dfn_and_concepts(dfns):
                 cnt_res_concepts += 1
+            elif is_dfn_and_dfnfors(dfns):
+                cnt_res_dfnfors += 1
             else:
                 # unclear which dfn belongs to the content
                 cnt_skip_multiple += 1
@@ -240,12 +281,12 @@ def extract_dfns(soup):
         "Extracted %d dnfs, remaining %d, quota %.2f",
         n_definitions, n_remaining_dfns, extr_rate
     )
+    logging.info("Skipped %d dfns due to missing id", cnt_skip_noid)
     logging.info("Skipped %d dfns due to multiple dfns in context", cnt_skip_multiple)
     logging.info("Resolved %d multiple dfns by identifying conjunction", cnt_res_multiple)
     logging.info("Resolved %d multiple dfns by identifying at most one non-concept", cnt_res_concepts)
+    logging.info("Resolved %d multiple dfns by identifying dfn and dfn-fors", cnt_res_dfnfors)
     logging.info("Skipped %d dfns due to not understanding them", cnt_skip_unknown)
-
-    return definitions
 
 
 def fetch_spec(download=True):
@@ -268,17 +309,86 @@ def fetch_spec(download=True):
     return spec
 
 
+llm_client = OpenAI(
+    base_url="http://127.0.0.1:8080/v1",
+    api_key = "sk-no-key-required"
+)
+
+def llm_classify_dfn(parent, dfn):
+    template = """
+    ```
+    {context}
+    ```
+    Classify the concept `#{identifier}` into one of these categories:
+    "callable", "variable", "value", "unknown"
+    Respond only with the category, nothing else.
+    """
+
+    context = str(parent)
+    identifier = extract_identifier(dfn)
+    if not identifier:
+        logging.warning("Cannot find identifier, skip classifying dfn '%s'", str(dfn))
+        return
+
+    template = re.sub(r"\ +", " ", template)
+    prompt = template.format(context=context, identifier=identifier)
+
+    completion = llm_client.chat.completions.create(
+        model="LLaMA_CPP",
+        messages=[
+            {"role": "system", "content": "You classify concepts from the WHATWG HTML Spec and complete tasks with highest precision."},
+            {"role": "user", "content": prompt}
+        ]
+    )
+    print(completion)
+    res = completion.choices[0].message.content
+
+    # TODO rather be a bit more forgiving and check if exactly one of the strings
+    # is in the response?
+    match = re.search(r'category="(.+?)".*', res)
+    if not match:
+        logging.warning("LLM categorization output incomprehensible: %s", res)
+        return "unknown"
+
+    ctype = match.group(1)
+
+    if ctype not in ("callable", "variable", "value", "unknown"):
+        logging.warning("LLM categorization output incomprehensible: %s", res)
+        return "unknown"
+    
+    logging.info("LLM classified %s as %s", identifier, ctype)
+    
+    return ctype
+
+
+def classify_dfns(soup, definitions):
+    # TODO caching, have an override file for llm results
+    for dfn in tqdm(soup.find_all("dfn")):
+        parent = dfn.find_parent()    
+
+        if not parent:
+            logging.debug("No parent element, skipping classify dfn '%s'", dfn)
+            continue
+
+        res = llm_classify_dfn(parent, dfn)
+        identifier = extract_identifier(dfn)
+        definitions.set_ctype(identifier, res)
+
 def main():
     source = fetch_spec(download=False)
 
-    logging.info("Parsing source")
+    logging.info("Parsing source into soup")
     soup = BeautifulSoup(source, Config.parser)
 
     logging.info("Stripping of comments, notes etc.")
     remove_uninteresting(soup)
 
+    logging.info("Classifying dfns")
+    definitions = Definitions()
+    classify_dfns(soup, definitions)
+
     logging.info("Extracting dfns")
-    definitions = extract_dfns(soup)
+    extract_dfns(soup, definitions)
 
     logging.info("Serializing remaining doc")
     unused_source = soup.decode()
